@@ -1,0 +1,13 @@
+{
+  "name": "archura-flow",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "capture": "node src/capture.mjs",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "playwright": "1.62.0"
+  }
+}

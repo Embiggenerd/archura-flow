@@ -1,0 +1,361 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>archura-flow viewer</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+      background: #0c1017;
+      color: #e8edf5;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-width: 320px; }
+    header {
+      position: sticky; top: 0; z-index: 4; display: flex; align-items: center;
+      gap: 18px; min-height: 64px; padding: 12px 22px; background: #111722f2;
+      border-bottom: 1px solid #273142; backdrop-filter: blur(14px);
+    }
+    h1 { margin: 0; font-size: 17px; letter-spacing: -.02em; }
+    .domain { color: #8fa1b8; font-size: 13px; }
+    nav { display: flex; gap: 6px; margin-left: auto; }
+    button {
+      appearance: none; border: 1px solid #334157; border-radius: 8px;
+      background: #17202d; color: inherit; padding: 8px 12px; cursor: pointer;
+    }
+    button:hover, button.active { border-color: #67e8c6; color: #8df5da; }
+    main { padding: 24px; }
+    .toolbar {
+      display: flex; gap: 10px; align-items: center; margin-bottom: 20px;
+      color: #97a8bc; font-size: 13px;
+    }
+    select {
+      border: 1px solid #334157; border-radius: 8px; color: #e8edf5;
+      background: #17202d; padding: 8px 10px;
+    }
+    .view[hidden] { display: none; }
+    .journey {
+      display: flex; align-items: flex-start; gap: 14px; overflow-x: auto;
+      padding: 4px 4px 22px;
+    }
+    .step { display: flex; align-items: center; gap: 14px; flex: none; }
+    .screen-card {
+      width: 310px; overflow: hidden; border: 1px solid #2c384a; border-radius: 12px;
+      background: #131b27; box-shadow: 0 12px 30px #0004;
+    }
+    .screen-card img {
+      width: 100%; height: 190px; object-fit: cover; object-position: top;
+      background: #080b10; display: block; border-bottom: 1px solid #2c384a;
+    }
+    .card-body { padding: 13px; }
+    .card-title { display: flex; justify-content: space-between; gap: 8px; }
+    .card-title strong { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .badge {
+      flex: none; padding: 2px 6px; border-radius: 999px; background: #253248;
+      color: #9fb3ca; font-size: 10px; text-transform: uppercase;
+    }
+    .url { color: #8394aa; font: 11px ui-monospace, monospace; margin: 7px 0 12px; overflow-wrap: anywhere; }
+    textarea {
+      width: 100%; min-height: 74px; resize: vertical; border: 1px solid #303c50;
+      border-radius: 7px; background: #0e141e; color: #dce6f2; padding: 8px;
+    }
+    .edge {
+      width: 145px; color: #8fa1b8; font-size: 11px; line-height: 1.4;
+      text-align: center; overflow-wrap: anywhere;
+    }
+    .edge::after { content: "⟶"; display: block; color: #67e8c6; font-size: 28px; }
+    .graph {
+      overflow: auto; border: 1px solid #273142; border-radius: 12px;
+      background: radial-gradient(circle at 1px 1px, #283447 1px, transparent 0);
+      background-size: 24px 24px;
+    }
+    .graph svg { display: block; min-width: 100%; }
+    .graph .node-box { fill: #131b27; stroke: #3a4960; }
+    .graph .node-shot { clip-path: inset(0 round 7px 7px 0 0); }
+    .graph .node-id { fill: #8df5da; font: 700 12px ui-monospace, monospace; }
+    .graph .node-title { fill: #e8edf5; font: 12px Inter, sans-serif; }
+    .graph .edge-line { fill: none; stroke: #67e8c6; stroke-width: 1.5; opacity: .75; }
+    .graph .edge-label { fill: #91a2b6; font: 10px Inter, sans-serif; }
+    .coverage {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 12px; margin-bottom: 18px;
+    }
+    .metric { padding: 16px; border: 1px solid #2d394c; border-radius: 10px; background: #131b27; }
+    .metric strong { display: block; font-size: 28px; color: #8df5da; }
+    .metric span { color: #91a2b6; font-size: 12px; }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    th, td { padding: 9px; border-bottom: 1px solid #273142; text-align: left; vertical-align: top; }
+    th { color: #91a2b6; }
+    .empty { padding: 42px; color: #8fa1b8; text-align: center; border: 1px dashed #334157; border-radius: 10px; }
+    @media (max-width: 700px) {
+      header { flex-wrap: wrap; }
+      nav { order: 3; width: 100%; margin: 0; }
+      main { padding: 16px; }
+      .screen-card { width: 270px; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>archura-flow</h1>
+    <span class="domain" id="domain"></span>
+    <nav>
+      <button data-view="journeys" class="active">Journeys</button>
+      <button data-view="graph">Graph</button>
+      <button data-view="coverage">Coverage</button>
+    </nav>
+    <button id="export">Export notes.json</button>
+  </header>
+  <main>
+    <section class="view" id="journeys">
+      <div class="toolbar">
+        <label for="journey-select">Journey</label>
+        <select id="journey-select"></select>
+      </div>
+      <div id="journey"></div>
+    </section>
+    <section class="view" id="graph" hidden></section>
+    <section class="view" id="coverage" hidden></section>
+  </main>
+  <script src="./data.js"></script>
+  <script>
+    (() => {
+      const data = window.DATA || { domain: '', screens: [], journeys: [], ledger: [], notes: {} };
+      const storageKey = `archura-flow:${data.domain}:notes`;
+      let notes = { ...data.notes };
+      try { notes = { ...notes, ...JSON.parse(localStorage.getItem(storageKey) || '{}') }; } catch {}
+      const byId = new Map(data.screens.map((screen) => [screen.id, screen]));
+      document.getElementById('domain').textContent = data.domain;
+
+      const saveNote = (screen, value) => {
+        notes[screen] = value;
+        localStorage.setItem(storageKey, JSON.stringify(notes));
+      };
+      const card = (screen) => {
+        const article = document.createElement('article');
+        article.className = 'screen-card';
+        const image = document.createElement('img');
+        image.src = screen.shots.desktop;
+        image.alt = screen.title;
+        image.loading = 'lazy';
+        const body = document.createElement('div');
+        body.className = 'card-body';
+        const title = document.createElement('div');
+        title.className = 'card-title';
+        const strong = document.createElement('strong');
+        strong.textContent = `${screen.id} · ${screen.title}`;
+        const badge = document.createElement('span');
+        badge.className = 'badge';
+        badge.textContent = screen.sameAs ? `same as ${screen.sameAs}` : screen.source;
+        title.append(strong, badge);
+        const url = document.createElement('div');
+        url.className = 'url';
+        url.textContent = screen.url;
+        const note = document.createElement('textarea');
+        note.placeholder = 'Notes for this screen…';
+        note.value = notes[screen.id] || '';
+        note.setAttribute('aria-label', `Notes for ${screen.id}`);
+        note.addEventListener('input', () => saveNote(screen.id, note.value));
+        body.append(title, url, note);
+        article.append(image, body);
+        return article;
+      };
+
+      const journeySelect = document.getElementById('journey-select');
+      data.journeys.forEach((journey) => {
+        const option = document.createElement('option');
+        option.value = journey.id;
+        option.textContent = `${journey.id} (${journey.steps.length} steps)`;
+        journeySelect.append(option);
+      });
+      const renderJourney = () => {
+        const root = document.getElementById('journey');
+        root.replaceChildren();
+        const journey = data.journeys.find((item) => item.id === journeySelect.value) || data.journeys[0];
+        if (!journey) {
+          root.className = 'empty';
+          root.textContent = 'No journeys captured yet.';
+          return;
+        }
+        root.className = 'journey';
+        journey.steps.forEach((step, index) => {
+          const screen = byId.get(step.screen);
+          if (!screen) return;
+          const wrapper = document.createElement('div');
+          wrapper.className = 'step';
+          if (index) {
+            const edge = document.createElement('div');
+            edge.className = 'edge';
+            edge.textContent = step.edge?.map((action) => action.label).join(' · ') || 'navigate';
+            wrapper.append(edge);
+          }
+          wrapper.append(card(screen));
+          root.append(wrapper);
+        });
+      };
+      journeySelect.addEventListener('change', renderJourney);
+      renderJourney();
+
+      const graph = document.getElementById('graph');
+      if (!data.screens.length) {
+        graph.className = 'view empty';
+        graph.textContent = 'No screens captured yet.';
+      } else {
+        graph.className = 'view graph';
+        const outgoing = new Map();
+        const edges = [];
+        for (const journey of data.journeys) {
+          journey.steps.forEach((step, index) => {
+            if (!index) return;
+            const from = journey.steps[index - 1].screen;
+            const key = `${from}:${step.screen}:${step.edge?.map((edge) => edge.label).join(' · ') || 'navigate'}`;
+            if (!outgoing.has(key)) {
+              outgoing.set(key, true);
+              edges.push({
+                from,
+                to: step.screen,
+                label: step.edge?.map((edge) => edge.label).join(' · ') || 'navigate',
+              });
+            }
+          });
+        }
+        const namespace = 'http://www.w3.org/2000/svg';
+        const columns = Math.min(4, Math.max(1, Math.ceil(Math.sqrt(data.screens.length))));
+        const nodeWidth = 240;
+        const nodeHeight = 176;
+        const gapX = 90;
+        const gapY = 80;
+        const positions = new Map(data.screens.map((screen, index) => [
+          screen.id,
+          {
+            x: 42 + (index % columns) * (nodeWidth + gapX),
+            y: 42 + Math.floor(index / columns) * (nodeHeight + gapY),
+          },
+        ]));
+        const rows = Math.ceil(data.screens.length / columns);
+        const svg = document.createElementNS(namespace, 'svg');
+        svg.setAttribute('width', 84 + columns * nodeWidth + (columns - 1) * gapX);
+        svg.setAttribute('height', 84 + rows * nodeHeight + (rows - 1) * gapY);
+        const defs = document.createElementNS(namespace, 'defs');
+        const marker = document.createElementNS(namespace, 'marker');
+        marker.setAttribute('id', 'arrow');
+        marker.setAttribute('viewBox', '0 0 10 10');
+        marker.setAttribute('refX', '9');
+        marker.setAttribute('refY', '5');
+        marker.setAttribute('markerWidth', '6');
+        marker.setAttribute('markerHeight', '6');
+        marker.setAttribute('orient', 'auto-start-reverse');
+        const arrow = document.createElementNS(namespace, 'path');
+        arrow.setAttribute('d', 'M 0 0 L 10 5 L 0 10 z');
+        arrow.setAttribute('fill', '#67e8c6');
+        marker.append(arrow);
+        defs.append(marker);
+        svg.append(defs);
+        edges.forEach((edge) => {
+          const from = positions.get(edge.from);
+          const to = positions.get(edge.to);
+          if (!from || !to) return;
+          const same = edge.from === edge.to;
+          const line = document.createElementNS(namespace, 'path');
+          line.setAttribute('class', 'edge-line');
+          line.setAttribute('marker-end', 'url(#arrow)');
+          line.setAttribute('d', same
+            ? `M ${from.x + nodeWidth - 25} ${from.y + 20} C ${from.x + nodeWidth + 50} ${from.y - 35}, ${from.x + nodeWidth + 50} ${from.y + 80}, ${from.x + nodeWidth - 5} ${from.y + 80}`
+            : `M ${from.x + nodeWidth / 2} ${from.y + nodeHeight / 2} C ${from.x + nodeWidth / 2} ${to.y}, ${to.x + nodeWidth / 2} ${from.y + nodeHeight}, ${to.x + nodeWidth / 2} ${to.y + nodeHeight / 2}`);
+          svg.append(line);
+          const label = document.createElementNS(namespace, 'text');
+          label.setAttribute('class', 'edge-label');
+          label.setAttribute('x', (from.x + to.x + nodeWidth) / 2);
+          label.setAttribute('y', (from.y + to.y + nodeHeight) / 2 - 5);
+          label.setAttribute('text-anchor', 'middle');
+          label.textContent = edge.label.slice(0, 34);
+          svg.append(label);
+        });
+        data.screens.forEach((screen) => {
+          const position = positions.get(screen.id);
+          const group = document.createElementNS(namespace, 'g');
+          const box = document.createElementNS(namespace, 'rect');
+          box.setAttribute('class', 'node-box');
+          box.setAttribute('x', position.x);
+          box.setAttribute('y', position.y);
+          box.setAttribute('width', nodeWidth);
+          box.setAttribute('height', nodeHeight);
+          box.setAttribute('rx', '9');
+          const image = document.createElementNS(namespace, 'image');
+          image.setAttribute('class', 'node-shot');
+          image.setAttribute('href', screen.shots.desktop);
+          image.setAttribute('x', position.x + 1);
+          image.setAttribute('y', position.y + 1);
+          image.setAttribute('width', nodeWidth - 2);
+          image.setAttribute('height', 126);
+          image.setAttribute('preserveAspectRatio', 'xMidYMin slice');
+          const id = document.createElementNS(namespace, 'text');
+          id.setAttribute('class', 'node-id');
+          id.setAttribute('x', position.x + 12);
+          id.setAttribute('y', position.y + 148);
+          id.textContent = screen.id;
+          const title = document.createElementNS(namespace, 'text');
+          title.setAttribute('class', 'node-title');
+          title.setAttribute('x', position.x + 42);
+          title.setAttribute('y', position.y + 148);
+          title.textContent = screen.title.slice(0, 28);
+          group.append(box, image, id, title);
+          svg.append(group);
+        });
+        graph.append(svg);
+      }
+
+      const coverage = document.getElementById('coverage');
+      const counts = data.ledger.reduce((result, entry) => {
+        const key = entry.bucket === 'skipped' ? `skipped:${entry.reason}` : entry.bucket;
+        result[key] = (result[key] || 0) + 1;
+        return result;
+      }, {});
+      const metrics = document.createElement('div');
+      metrics.className = 'coverage';
+      Object.entries(counts).sort().forEach(([label, count]) => {
+        const metric = document.createElement('div');
+        metric.className = 'metric';
+        const strong = document.createElement('strong');
+        strong.textContent = count;
+        const span = document.createElement('span');
+        span.textContent = label;
+        metric.append(strong, span);
+        metrics.append(metric);
+      });
+      const table = document.createElement('table');
+      table.innerHTML = '<thead><tr><th>Screen</th><th>Element</th><th>Bucket</th><th>Destination</th></tr></thead>';
+      const tbody = document.createElement('tbody');
+      data.ledger.forEach((entry) => {
+        const row = document.createElement('tr');
+        [entry.screen, entry.text || entry.key, entry.reason ? `${entry.bucket}: ${entry.reason}` : entry.bucket, entry.href || '—']
+          .forEach((value) => {
+            const cell = document.createElement('td');
+            cell.textContent = value;
+            row.append(cell);
+          });
+        tbody.append(row);
+      });
+      table.append(tbody);
+      coverage.append(metrics, table);
+
+      document.querySelectorAll('nav button').forEach((button) => {
+        button.addEventListener('click', () => {
+          document.querySelectorAll('nav button').forEach((item) => item.classList.toggle('active', item === button));
+          document.querySelectorAll('.view').forEach((view) => { view.hidden = view.id !== button.dataset.view; });
+        });
+      });
+      document.getElementById('export').addEventListener('click', () => {
+        const blob = new Blob([`${JSON.stringify(notes, null, 2)}\n`], { type: 'application/json' });
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.download = 'notes.json';
+        link.click();
+        setTimeout(() => URL.revokeObjectURL(link.href), 0);
+      });
+    })();
+  </script>
+</body>
+</html>

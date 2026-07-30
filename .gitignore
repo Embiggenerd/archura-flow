@@ -1,0 +1,7 @@
+node_modules/
+out/*
+!out/*/
+out/*/*
+!out/*/notes.json
+profiles/
+.DS_Store

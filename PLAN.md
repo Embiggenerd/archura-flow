@@ -287,8 +287,10 @@ plain pages; otherwise replay steps addressed by ledger `key` (required), with
 `key`: `tag|trimmed-text|dom-path`, scoped to its screen. `bucket`:
 `"visited" | "duplicate" | "skipped"`. `reason` (skipped only):
 `"external" | "destructive-floor" | "needs-manual" | "file-upload" |
-"max-depth" | "budget-exhausted" | "unreplayable"`. `href`: links only,
-known pre-click.
+"max-depth" | "budget-exhausted" | "unreplayable"`. A transient `"pending"`
+may appear on disk only while an explorer run is in flight (or after a killed
+run); completed runs resolve every `pending`, and `needs-manual` always means
+a deliberate human-judgment bucket. `href`: links only, known pre-click.
 
 `notes.json`: `{ "<screen-id>": "free text" }`.
 
