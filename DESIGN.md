@@ -3,9 +3,9 @@
 Human-driven capture of authenticated app surfaces → screen graph with a coverage
 ledger → wireflow viewer with notes → implementation corpus consumable by models.
 
-First target: the Outseta console audit during the 7-day trial. Generic by design —
-nothing Outseta-specific in the data model; the same tool should later map any app
-worth rebuilding on envelopment.
+Built for auditing third-party SaaS consoles during a trial window, but generic
+by design — nothing target-specific in the data model; the same tool can map any
+authenticated app.
 
 ## Decisions (design conversation, 2026-07-29)
 
@@ -24,13 +24,13 @@ worth rebuilding on envelopment.
   (captured at desktop, before any resize; inliner mechanism is a slice detail)
   plus screenshots at all three viewports. Combo press = human declaring "this is
   a screen" — graph nodes are curated, not heuristically deduped.
-- **Dual driver, one browser.** Igor drives by hand in the headed window; an agent
+- **Dual driver, one browser.** The operator drives by hand in the headed window; an agent
   drives the same browser by attaching to a CDP endpoint the wrapper exposes
   (Playwright MCP `--cdp-endpoint`, or a thin connectOverCDP driver). One browser,
   one trace, either driver. The capture trigger is driver-agnostic: the combo is a
   page-level key listener, so an agent fires it with a synthetic keypress — no
-  separate capture API. Agent pacing must be human-ish on go.outseta.com
-  (Cloudflare scores machine-speed clicking). Later slice: ledger.json as the
+  separate capture API. Agent pacing must be human-ish on WAF-protected targets
+  (bot mitigation scores machine-speed clicking). Later slice: ledger.json as the
   agent's work queue (visit unaccounted elements; skip buckets double as the
   do-not-click list) — needs the post-processor first.
 - **Multi-viewport** (desktop 1440×900 / tablet 768×1024 / mobile 390×844):
@@ -58,8 +58,7 @@ worth rebuilding on envelopment.
   folder, one audit, no domain picker. Wireflow per journey (screenshot strips,
   labeled arrows) plus a screen-graph view; committed thumbnails; per-node notes
   editable in the page (localStorage autosave + export back to `notes.json` so
-  notes are committable and model-readable). Same pattern as
-  shurale/strategy/outseta-graph.
+  notes are committable and model-readable).
 - **Corpus format:** plain JSON + PNG + HTML snapshots on disk. Model-agnostic on
   purpose — other models must be able to consume it for visual generation.
 
@@ -85,8 +84,8 @@ Per captured screen: self-contained HTML snapshot + screenshots at desktop
 graph rendered as a wireflow chart (nodes = screens, edges = links and click
 actions) with per-page notes (localStorage autosave + export to notes.json).
 
-- Login: manual handoff — headed browser on a persistent profile dir, Igor logs
-  in once, session survives restarts. No site-specific auto-login.
+- Login: manual handoff — headed browser on a persistent profile dir, the
+  operator logs in once, session survives restarts. No site-specific auto-login.
 - Human and agent driving (key combo capture, CDP attach) are part of the same
   version and pipeline, not a later layer.
 - One global action budget (navigations + clicks + replays) required — unbounded
@@ -94,10 +93,9 @@ actions) with per-page notes (localStorage autosave + export to notes.json).
   (skipped: budget-exhausted), never silent.
 - Because clicks create same-URL states (modals, inline forms), the URL +
   DOM-signature screen identity heuristic is required in V1, not deferrable.
-- Never pointed at go.outseta.com until run against free targets first; the WAF
-  rule (no headless, human-ish pacing) always applies there.
-- Reuse patterns from shurale/archura-editor/scripts/outseta-{crawl,build-graph}.mjs
-  and the outseta-graph viewer.
+- Never pointed at a WAF-protected production target until proven against
+  free/local targets first; on such targets the WAF rule (no headless,
+  human-ish pacing) always applies.
 
 ## Known limits (named, not silent)
 
@@ -122,4 +120,5 @@ isolated in identity.mjs and expected to be tuned).
 
 ## Status
 
-Design only. No implementation until Igor says go.
+Implemented (PLAN Phases 1–6). `npm test` runs the end-to-end suite against a
+local fixture; prove changes there before pointing at a real target.

@@ -2,12 +2,12 @@
 
 Build order for the one version in DESIGN.md. Phases are construction sequence,
 not release slices — nothing ships until it all works. Each phase has a verify
-step against a free target; go.outseta.com is touched by none of them.
+step against a free target; no real/WAF-protected target is touched by any of them.
 
 ## Stack & layout (proposed)
 
-Node + Playwright, plain ESM `.mjs`, no build step, no TypeScript — same idiom as
-shurale/archura-editor scripts. Only dependency: `playwright`.
+Node + Playwright, plain ESM `.mjs`, no build step, no TypeScript. Only
+dependency: `playwright`.
 
 ```
 archura-flow/
@@ -33,8 +33,8 @@ archura-flow/
 
 `node src/capture.mjs <domain>` launches headed Chromium via
 `launchPersistentContext(profiles/<domain>)` with viewport **1440×900**,
-navigates to the domain, and idles. Igor logs in by hand; session persists
-across runs.
+navigates to the domain, and idles. The operator logs in by hand; session
+persists across runs.
 
 Viewport constants (capture.mjs / snapshot.mjs): desktop `1440×900`, tablet
 `768×1024`, mobile `390×844`. Launch uses desktop; every capture restores to
@@ -63,7 +63,7 @@ desktop after the tablet/mobile passes.
      (entire scroll height) by default with a max-height cap for infinite feeds;
      viewport-only as a flag. Named limit: lazy-loaded below-fold content is
      captured only if it loaded (explorer does a scroll-to-bottom pass first;
-     manual mode relies on Igor);
+     manual mode relies on the operator);
   3. append node to `screens.json`, append step to the session's
      `journeys/<timestamp>.json` (press order = journey order; the edge between
      consecutive presses carries the action-journal entries in between).
@@ -113,7 +113,7 @@ Canonical template at `viewer/index.html`. Each run writes into `out/<domain>/`:
 copy of the viewer as `index.html` that loads sibling `./data.js` via a script
 tag — `fetch` of JSON is blocked under `file://` but script tags are not, so
 double-clicking `out/<domain>/index.html` opens that domain's corpus. No domain
-picker; one output folder = one audit. Reuse outseta-graph viewer patterns.
+picker; one output folder = one audit.
 
 - Journey view: horizontal screenshot strip, labeled arrows between steps.
 - Graph view: screens as nodes, link/click edges.
@@ -181,7 +181,7 @@ manual passes.
   mentions delete is destructive). Floor terms: logout, sign out, delete
   account/workspace, cancel subscription, payment/checkout submission.
   **Uncertain cases are never clicked** — bucketed skipped(needs-manual) for
-  Igor to handle in manual mode. Patterns live in one place in explore.mjs.
+  the operator to handle in manual mode. Patterns live in one place in explore.mjs.
 - Server-side mutations persist across replays (expected — audit account is
   disposable). Replay assumes the app renders the same controls for the same
   data; when a path fails to replay, the state is marked unstable and its
@@ -213,9 +213,9 @@ combo → node appears in screens.json with all four files.
 - Stylesheet inlining fails on some app → keep raw HTML + separate CSS files
   per screen instead of inlining (viewer unaffected; snapshot less portable).
 - Replay cost blows up on deep or flaky flows → lower the depth cap; anything
-  deeper becomes manual-mode work (Igor stages it, presses the combo).
+  deeper becomes manual-mode work (the operator stages it, presses the combo).
 - Action-path replay too unreliable on a target → add combo-style manual
-  takeover mid-explore (Igor stages the state, explorer resumes from it).
+  takeover mid-explore (the operator stages the state, explorer resumes from it).
 
 ## Appendix — pinned JSON shapes
 
@@ -294,9 +294,9 @@ a deliberate human-judgment bucket. `href`: links only, known pre-click.
 
 `notes.json`: `{ "<screen-id>": "free text" }`.
 
-## Order of operations when Igor says go
+## Order of operations
 
 1. Scaffold (package.json, .gitignore, playwright install) → propose initial
    commit for approval.
 2. Phases 1→6 in order; each phase's verify run happens before the next starts.
-3. Free target throughout; Outseta trial starts only after Phase 5 verifies.
+3. Free target throughout; a real target audit starts only after Phase 5 verifies.

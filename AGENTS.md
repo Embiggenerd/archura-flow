@@ -75,7 +75,7 @@ Lots of times both humans and agents try to signal proof of smart, but really we
 
 Proof of smart — the plan shows how clever / thorough / architecturally impressive we are: deep digressions, edge cases nobody asked for, elegant abstractions, long taxonomies. It impresses a reader. It may never change what ships next.
 
-Proof of useful — the plan makes the next real action cheaper and safer: clear scope, ordered work, verify steps, explicit outs, something Igor can say “go” on and then check. It earns its keep by reducing risk or time to a working outcome.
+Proof of useful — the plan makes the next real action cheaper and safer: clear scope, ordered work, verify steps, explicit outs, something the developer can say “go” on and then check. It earns its keep by reducing risk or time to a working outcome.
 
 For instance, before implementing concurrency solutions, ask if data can't simply be forked. Reduce the choices you have to make by removing the most complex possibilities.
 
