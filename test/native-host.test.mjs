@@ -13,7 +13,7 @@ import {
   ProtocolError,
   validateInbound,
 } from '../src/native-protocol.mjs';
-import { guardStdout, NativeHost } from '../src/native-host.mjs';
+import { guardStdout, MessageProcessor, NativeHost } from '../src/native-host.mjs';
 
 const frame = (value) => encodeMessage(value);
 
@@ -80,18 +80,26 @@ test('validation rejects unsupported versions, unknown types, and bad chunks', (
   assert.throws(() => validateInbound({ type: 'debugger.sendCommand' }), (error) =>
     error.code === 'unknown-type');
   // The artifact allowlist is what stops a message from naming a file path.
-  assert.throws(() => validateInbound({ type: 'capture.chunk', artifact: '../../etc/passwd', index: 0, data: '' }),
+  assert.throws(() => validateInbound({
+    type: 'capture.chunk', requestId: 'r1', artifact: '../../etc/passwd', index: 0, data: '',
+  }),
     (error) => error.code === 'unknown-artifact');
-  assert.throws(() => validateInbound({ type: 'capture.chunk', artifact: 'html', index: -1, data: '' }), (error) =>
-    error.code === 'bad-chunk');
+  assert.throws(() => validateInbound({
+    type: 'capture.chunk', requestId: 'r1', artifact: 'html', index: -1, data: '',
+  }), (error) => error.code === 'bad-chunk');
   assert.throws(() => validateInbound({
     type: 'capture.chunk',
+    requestId: 'r1',
     artifact: 'html',
     index: 0,
     data: 'x'.repeat(MAX_CHUNK_BYTES * 2 + 1),
   }), (error) => error.code === 'bad-chunk');
   assert.throws(() => validateInbound({ type: 'journal.append', entries: 'nope' }), (error) =>
     error.code === 'bad-journal');
+  assert.throws(() => validateInbound({
+    type: 'capture.begin',
+    requestId: '../../../../outside',
+  }), (error) => error.code === 'bad-request-id');
 });
 
 test('guardStdout diverts stray logging away from the protocol stream', () => {
@@ -122,6 +130,33 @@ test('writer serializes frames onto the stream a reader can consume', async () =
   await write({ type: 'ready', protocolVersion: PROTOCOL_VERSION });
   const messages = new FrameReader().push(Buffer.concat(chunks));
   assert.deepEqual(messages, [{ type: 'ready', protocolVersion: PROTOCOL_VERSION }]);
+});
+
+test('message processor serializes separate stdin data events', async () => {
+  const order = [];
+  const host = {
+    async handle(message) {
+      order.push(`start:${message.reason}`);
+      if (message.reason === 'first') await new Promise((resolve) => setTimeout(resolve, 20));
+      order.push(`end:${message.reason}`);
+    },
+  };
+  const processor = new MessageProcessor({ reader: new FrameReader(), host });
+  const first = processor.push(frame({ type: 'session.stop', reason: 'first' }));
+  const second = processor.push(frame({ type: 'session.stop', reason: 'second' }));
+  await Promise.all([first, second]);
+  assert.deepEqual(order, ['start:first', 'end:first', 'start:second', 'end:second']);
+});
+
+test('message processor drain preserves a fatal framing error', async () => {
+  const processor = new MessageProcessor({
+    reader: new FrameReader({ maxBytes: 4 }),
+    host: { handle: async () => {} },
+  });
+  const header = Buffer.alloc(4);
+  header.writeUInt32LE(5);
+  await assert.rejects(processor.push(header), (error) => error.code === 'message-too-large');
+  await assert.rejects(processor.drain(), (error) => error.code === 'message-too-large');
 });
 
 async function makeHost() {
@@ -159,6 +194,9 @@ test('journal entries deduplicate by sequence and reject a stale epoch', async (
 
   await host.handle({ type: 'journal.append', epoch: 'from-a-dead-host', entries: [entry(9, 'stale')] });
   assert.equal(sent.at(-1).code, 'stale-epoch');
+
+  await host.handle({ type: 'journal.append', entries: [entry(10, 'missing epoch')] });
+  assert.equal(sent.at(-1).code, 'stale-epoch');
 });
 
 test('a second session.start is refused while one is recording', async () => {
@@ -171,8 +209,33 @@ test('a second session.start is refused while one is recording', async () => {
 test('stopping clears session state and reports idle', async () => {
   const { host, sent } = await makeHost();
   await host.handle({ type: 'session.start', url: 'https://app.example.com/' });
-  await host.handle({ type: 'session.stop', reason: 'tab-closed' });
+  const { epoch } = host.session;
+  await host.handle({ type: 'session.stop', epoch, reason: 'tab-closed' });
   assert.equal(host.state, 'idle');
   assert.equal(sent.at(-1).state, 'idle');
   assert.equal(sent.at(-1).reason, 'tab-closed');
+});
+
+test('starting a new session replaces the viewer bound to the previous run', async () => {
+  const rootDir = await mkdtemp(path.join(os.tmpdir(), 'archura-flow-viewer-session-'));
+  const opened = [];
+  const sent = [];
+  const host = new NativeHost({
+    rootDir,
+    send: async (message) => { sent.push(message); },
+    viewerFactory: async ({ run }) => {
+      opened.push(run.name);
+      return { url: `http://viewer/${run.name}`, close: async () => {} };
+    },
+  });
+  await host.handle({ type: 'session.start', url: 'https://first.example/' });
+  let { epoch } = host.session;
+  await host.handle({ type: 'viewer.open', epoch, requestId: 'v1' });
+  await host.handle({ type: 'session.stop', epoch, reason: 'switch' });
+  await host.handle({ type: 'session.start', url: 'https://second.example/' });
+  ({ epoch } = host.session);
+  await host.handle({ type: 'viewer.open', epoch, requestId: 'v2' });
+  assert.deepEqual(opened, ['first.example', 'second.example']);
+  assert.equal(sent.at(-1).url, 'http://viewer/second.example');
+  await host.shutdown();
 });

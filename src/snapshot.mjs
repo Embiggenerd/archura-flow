@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import {
   MAX_SCREENSHOT_HEIGHT,
@@ -162,40 +162,53 @@ export async function recordScreen({
   const htmlPath = `html/${id}.html`;
   const shots = Object.fromEntries(Object.keys(VIEWPORTS).map((name) =>
     [name, `shots/${id}-${name}.png`]));
-  // A transport that could not produce every viewport returns the subset it
-  // actually wrote, so the record never points at a file that does not exist.
-  const written = await writeArtifacts({ id, htmlPath, shots });
+  const screenLength = run.screens.screens.length;
+  const ledgerBefore = structuredClone(run.ledger);
+  const journeyLength = run.journey.steps.length;
 
-  const screen = {
-    id,
-    signature,
-    url,
-    title,
-    source,
-    ...(source === 'combo' && known ? { sameAs: known.id } : {}),
-    state: {
-      root: state?.root || url,
-      path: state?.path || [],
-    },
-    shots: written?.shots || shots,
-    html: htmlPath,
-    capturedAt: new Date().toISOString(),
-    ...(metadata || {}),
-  };
-  run.screens.screens.push(screen);
+  try {
+    const written = await writeArtifacts({ id, htmlPath, shots });
+    const screen = {
+      id,
+      signature,
+      url,
+      title,
+      source,
+      ...(source === 'combo' && known ? { sameAs: known.id } : {}),
+      state: {
+        root: state?.root || url,
+        path: state?.path || [],
+      },
+      shots: written?.shots || shots,
+      html: htmlPath,
+      capturedAt: new Date().toISOString(),
+      ...(metadata || {}),
+    };
+    run.screens.screens.push(screen);
 
-  const elements = await collectElements();
-  run.ledger.elements.push(...elements.map((element) => ledgerEntry(element, id)));
+    const elements = await collectElements();
+    run.ledger.elements.push(...elements.map((element) => ledgerEntry(element, id)));
 
-  const previous = run.journey.steps.at(-1);
-  for (const action of edge) {
-    if (previous && action.key) {
-      setLedgerBucket(run.ledger, previous.screen, action.key, 'visited');
+    const previous = run.journey.steps.at(-1);
+    for (const action of edge) {
+      if (previous && action.key) {
+        setLedgerBucket(run.ledger, previous.screen, action.key, 'visited');
+      }
     }
+    run.journey.steps.push({ screen: id, edge });
+    await writeCorpus(run, rootDir);
+    return { screen, created: true, elements };
+  } catch (error) {
+    run.screens.screens.length = screenLength;
+    run.ledger.elements = ledgerBefore.elements;
+    run.journey.steps.length = journeyLength;
+    await Promise.all([
+      rm(path.join(run.dir, htmlPath), { force: true }),
+      ...Object.values(shots).map((shot) => rm(path.join(run.dir, shot), { force: true })),
+    ]);
+    await writeCorpus(run, rootDir).catch(() => {});
+    throw error;
   }
-  run.journey.steps.push({ screen: id, edge });
-  await writeCorpus(run, rootDir);
-  return { screen, created: true, elements };
 }
 
 export async function captureScreen({

@@ -16,7 +16,10 @@ export async function cleanupAbandonedCaptures(run) {
 
 export class PendingCapture {
   constructor({ run, requestId, url, title, viewports, warnings = [], tab }) {
-    if (!requestId) throw new ProtocolError('bad-capture', 'capture.begin requires a request id.');
+    if (typeof requestId !== 'string' || !/^[a-z0-9_-]{1,100}$/i.test(requestId)) {
+      throw new ProtocolError('bad-request-id',
+        'Request id must contain only letters, numbers, underscores, or hyphens.');
+    }
     if (!url) throw new ProtocolError('bad-capture', 'capture.begin requires a url.');
     this.run = run;
     this.requestId = requestId;
@@ -25,7 +28,11 @@ export class PendingCapture {
     this.viewports = viewports || {};
     this.warnings = warnings;
     this.tab = tab;
-    this.dir = path.join(run.dir, TEMP_DIR, String(requestId));
+    const captureRoot = path.resolve(run.dir, TEMP_DIR);
+    this.dir = path.resolve(captureRoot, requestId);
+    if (path.dirname(this.dir) !== captureRoot) {
+      throw new ProtocolError('bad-request-id', 'Request id escapes the capture directory.');
+    }
     this.received = new Map();
   }
 
@@ -58,11 +65,11 @@ export class PendingCapture {
     if (typeof skeleton !== 'string') {
       throw new ProtocolError('bad-capture', 'capture.commit requires a skeleton string.');
     }
-    if (!this.received.has('html')) {
-      throw new ProtocolError('missing-artifact', 'capture.commit arrived without html.');
-    }
-    if (!this.received.has('desktop')) {
-      throw new ProtocolError('missing-artifact', 'capture.commit arrived without a desktop screenshot.');
+    for (const artifact of ARTIFACT_NAMES) {
+      if (!this.received.has(artifact)) {
+        throw new ProtocolError('missing-artifact',
+          `capture.commit arrived without ${artifact}.`);
+      }
     }
 
     try {
@@ -85,7 +92,6 @@ export class PendingCapture {
           await rename(this.tempFile('html'), path.join(this.run.dir, htmlPath));
           const written = {};
           for (const artifact of SHOT_ARTIFACTS) {
-            if (!this.received.has(artifact)) continue;
             await rename(this.tempFile(artifact), path.join(this.run.dir, shots[artifact]));
             written[artifact] = shots[artifact];
           }

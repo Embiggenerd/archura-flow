@@ -93,6 +93,12 @@ export function validateInbound(message) {
     }
     return message;
   }
+  if (type.startsWith('capture.') || type === 'viewer.open') {
+    if (typeof message.requestId !== 'string' || !/^[a-z0-9_-]{1,100}$/i.test(message.requestId)) {
+      throw new ProtocolError('bad-request-id',
+        'Request id must contain only letters, numbers, underscores, or hyphens.');
+    }
+  }
   if (type === 'capture.chunk') {
     if (!ARTIFACT_NAMES.includes(message.artifact)) {
       throw new ProtocolError('unknown-artifact',

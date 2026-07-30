@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import * as scripts from '../../extension/browser-scripts.js';
+import { CdpSession } from '../../extension/cdp.js';
 
 // The CDP transport stringifies these and applies them to one JSON argument.
 const PAGE_FUNCTIONS = [
@@ -180,6 +181,21 @@ test('rebaseCss makes sheet-relative urls absolute against the sheet, not the pa
   assert.match(imported, /https:\/\/cdn\.example\.com\/css\/theme\.css/);
   const data = rebased('.a{background:url(data:image/png;base64,AAA)}', 'https://cdn.example.com/css/app.css');
   assert.match(data, /url\(data:image\/png;base64,AAA\)/);
+});
+
+test('device emulation pins screenshot scale to one by default', async () => {
+  let command;
+  globalThis.chrome = {
+    debugger: {
+      sendCommand: async (_target, method, params) => {
+        command = { method, params };
+      },
+    },
+  };
+  const cdp = new CdpSession(42);
+  await cdp.setDeviceMetrics({ width: 768, height: 1024 });
+  assert.equal(command.method, 'Emulation.setDeviceMetricsOverride');
+  assert.equal(command.params.deviceScaleFactor, 1);
 });
 
 function rebased(css, href) {

@@ -207,10 +207,93 @@ test('an interrupted capture leaves the prior graph untouched and clears its tem
   });
   assert.equal((await readdir(path.join(dir, TEMP_DIR))).length, 1);
 
-  await host.handle({ type: 'session.stop', reason: 'tab-closed' });
+  await host.handle({ type: 'session.stop', epoch, reason: 'tab-closed' });
   await assert.rejects(readdir(path.join(dir, TEMP_DIR)));
   const screens = JSON.parse(await readFile(path.join(dir, 'screens.json'), 'utf8'));
   assert.equal(screens.screens.length, 1);
+});
+
+test('tablet and mobile screenshots are required before commit', async () => {
+  const { host, sent } = await makeHost();
+  const epoch = await startSession(host);
+  await sendCapture(host, epoch, 'r1', { shots: ['desktop', 'tablet'] });
+  assert.equal(sent.at(-1).type, 'error');
+  assert.equal(sent.at(-1).code, 'missing-artifact');
+  assert.equal(host.session.capture.screenCount, 0);
+});
+
+test('capture edge is frozen at begin and later actions belong to the next screen', async () => {
+  const { host } = await makeHost();
+  const epoch = await startSession(host);
+  const append = (sequence, label) => host.handle({
+    type: 'journal.append',
+    epoch,
+    entries: [{ sequence, type: 'click', key: `k${sequence}`, label, url: URL_UNDER_TEST, at: 'now' }],
+  });
+  await append(1, 'before capture');
+  await host.handle({
+    type: 'capture.begin',
+    epoch,
+    requestId: 'r1',
+    url: URL_UNDER_TEST,
+    title: 'Plans',
+  });
+  await append(2, 'during capture');
+  for (const [artifact, value] of Object.entries({
+    html: Buffer.from(HTML),
+    desktop: PNG,
+    tablet: PNG,
+    mobile: PNG,
+  })) {
+    await host.handle({
+      type: 'capture.chunk',
+      epoch,
+      requestId: 'r1',
+      artifact,
+      index: 0,
+      data: value.toString('base64'),
+    });
+  }
+  await host.handle({
+    type: 'capture.commit',
+    epoch,
+    requestId: 'r1',
+    skeleton: SKELETON,
+    elements: [],
+  });
+  await sendCapture(host, epoch, 'r2');
+
+  assert.deepEqual(
+    host.session.run.journey.steps.map((step) => step.edge.map((action) => action.label)),
+    [['before capture'], ['during capture']],
+  );
+});
+
+test('a failed commit removes final artifacts and restores its journal edge', async () => {
+  const { host, sent } = await makeHost();
+  const epoch = await startSession(host);
+  await host.handle({
+    type: 'journal.append',
+    epoch,
+    entries: [{
+      sequence: 1,
+      type: 'click',
+      key: 'k1',
+      label: 'keep this edge',
+      url: URL_UNDER_TEST,
+      at: 'now',
+    }],
+  });
+  await sendCapture(host, epoch, 'r1', { elements: 'not-an-array' });
+
+  assert.equal(sent.at(-1).type, 'error');
+  assert.equal(host.session.capture.screenCount, 0);
+  assert.deepEqual(
+    host.session.capture.takeEdge('extension').map((entry) => entry.label),
+    ['keep this edge'],
+  );
+  await assert.rejects(stat(path.join(host.session.run.dir, 'html', 's1.html')));
+  await assert.rejects(stat(path.join(host.session.run.dir, 'shots', 's1-desktop.png')));
 });
 
 test('live viewer serves the corpus over loopback and refuses everything else', async () => {

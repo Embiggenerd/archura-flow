@@ -84,7 +84,7 @@ export class NativeHost {
     if (!this.session) {
       throw new ProtocolError('no-session', `${message.type} arrived before session.start.`);
     }
-    if (message.epoch && message.epoch !== this.session.epoch) {
+    if (message.epoch !== this.session.epoch) {
       throw new ProtocolError('stale-epoch',
         `Message carries epoch ${message.epoch}; current epoch is ${this.session.epoch}.`);
     }
@@ -125,9 +125,22 @@ export class NativeHost {
 
   async startSession(message) {
     if (!message.url) throw new ProtocolError('bad-session', 'session.start requires a url.');
+    let startUrl;
+    try {
+      startUrl = new URL(message.url);
+    } catch {
+      throw new ProtocolError('bad-session', 'session.start requires a valid URL.');
+    }
+    if (!['http:', 'https:'].includes(startUrl.protocol)) {
+      throw new ProtocolError('bad-session', 'session.start supports http and https URLs only.');
+    }
     if (this.session) {
       throw new ProtocolError('session-active',
         'A recording is already active; send session.stop before starting another.');
+    }
+    if (this.viewer) {
+      await this.viewer.close();
+      this.viewer = null;
     }
     const run = await createRun({
       rootDir: this.rootDir,
@@ -191,6 +204,7 @@ export class NativeHost {
       tab: message.tab || session.tab,
     });
     await pending.open();
+    pending.edge = session.capture.takeEdge('extension');
     this.pending.set(message.requestId, pending);
   }
 
@@ -206,13 +220,19 @@ export class NativeHost {
     const pending = this.pending.get(message.requestId);
     if (!pending) throw new ProtocolError('unknown-capture', `No open capture ${message.requestId}.`);
     try {
-      const result = await session.capture.enqueue(() => pending.commit({
-        skeleton: message.skeleton,
-        elements: message.elements || [],
-        state: message.state,
-        edge: session.capture.takeEdge('extension'),
-        rootDir: this.rootDir,
-      }));
+      let result;
+      try {
+        result = await session.capture.enqueue(() => pending.commit({
+          skeleton: message.skeleton,
+          elements: message.elements || [],
+          state: message.state,
+          edge: pending.edge,
+          rootDir: this.rootDir,
+        }));
+      } catch (error) {
+        session.capture.restoreEdge('extension', pending.edge);
+        throw error;
+      }
       await this.send({
         type: 'capture.done',
         requestId: message.requestId,
@@ -238,6 +258,7 @@ export class NativeHost {
       await this.send(await this.describeState());
       return;
     }
+    this.requireSession(message);
     for (const pending of this.pending.values()) await pending.discard();
     this.pending.clear();
     await cleanupAbandonedCaptures(this.session.run);
@@ -262,29 +283,54 @@ export class NativeHost {
   }
 }
 
+export class MessageProcessor {
+  constructor({ reader, host }) {
+    this.reader = reader;
+    this.host = host;
+    this.queue = Promise.resolve();
+  }
+
+  push(chunk) {
+    const task = this.queue.then(async () => {
+      const messages = this.reader.push(chunk);
+      for (const message of messages) await this.host.handle(message);
+    });
+    this.queue = task;
+    return task;
+  }
+
+  drain() {
+    return this.queue;
+  }
+}
+
 async function main() {
   guardStdout();
   const send = createWriter(process.stdout);
   const host = new NativeHost({ send });
   const reader = new FrameReader();
+  const processor = new MessageProcessor({ reader, host });
+  let finishing = false;
 
   const finish = async (code = 0) => {
+    if (finishing) return;
+    finishing = true;
     await host.shutdown();
     process.exit(code);
   };
 
-  process.stdin.on('data', async (chunk) => {
-    let messages;
-    try {
-      messages = reader.push(chunk);
-    } catch (error) {
+  process.stdin.on('data', (chunk) => {
+    processor.push(chunk).catch(async (error) => {
       await host.fail(null, error);
       await finish(1);
-      return;
-    }
-    for (const message of messages) await host.handle(message);
+    });
   });
-  process.stdin.on('end', () => finish(0));
+  process.stdin.on('end', () => {
+    processor.drain().then(() => finish(0)).catch(async (error) => {
+      await host.fail(null, error);
+      await finish(1);
+    });
+  });
   process.on('SIGTERM', () => finish(0));
   process.on('SIGINT', () => finish(0));
 }

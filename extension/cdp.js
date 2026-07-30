@@ -102,7 +102,7 @@ export class CdpSession {
     return result.data;
   }
 
-  async setDeviceMetrics({ width, height, mobile = false, deviceScaleFactor = 0 }) {
+  async setDeviceMetrics({ width, height, mobile = false, deviceScaleFactor = 1 }) {
     await this.send('Emulation.setDeviceMetricsOverride', {
       width,
       height,

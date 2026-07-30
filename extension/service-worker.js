@@ -57,6 +57,7 @@ function setStatus(status, patch = {}) {
       tabId: state.tabId,
       epoch: state.epoch,
       output: state.output,
+      screenCount: state.screenCount,
       sequence: state.sequence,
     },
   });
@@ -183,7 +184,13 @@ function listenerSource() {
 
 async function startSession(tab) {
   assertCapturable(tab);
-  setStatus('starting', { tabId: tab.id, tabUrl: tab.url, tabTitle: tab.title, lastError: null });
+  setStatus('starting', {
+    tabId: tab.id,
+    tabUrl: tab.url,
+    tabTitle: tab.title,
+    lastError: null,
+    viewerUrl: null,
+  });
   await connectHost();
 
   cdp = new CdpSession(tab.id);
@@ -373,6 +380,7 @@ async function onCommand(tab) {
 
 chrome.commands.onCommand.addListener(async (command, tab) => {
   if (command !== 'capture') return;
+  await startup;
   // The command callback carries the exact tab that received the shortcut —
   // this is what binds the session to a tab without a picker.
   const target = tab || (await chrome.tabs.query({ active: true, currentWindow: true }))[0];
@@ -397,6 +405,7 @@ chrome.tabs.onRemoved.addListener(async (tabId) => {
 
 chrome.runtime.onMessage.addListener((message, _sender, respond) => {
   (async () => {
+    await startup;
     switch (message.type) {
       case 'state':
         respond({ state: publicState() });
@@ -419,6 +428,11 @@ chrome.runtime.onMessage.addListener((message, _sender, respond) => {
         respond({ state: publicState() });
         return;
       case 'viewer': {
+        if (!state.epoch && state.viewerUrl) {
+          await chrome.tabs.create({ url: state.viewerUrl });
+          respond({ state: publicState() });
+          return;
+        }
         const requestId = nextRequestId();
         const reply = expect((item) =>
           (item.type === 'viewer.url' || item.type === 'error') && item.requestId === requestId, 15_000);
@@ -436,7 +450,24 @@ chrome.runtime.onMessage.addListener((message, _sender, respond) => {
   return true;
 });
 
-// A restarted worker must not believe it is still attached: reconcile against
-// the host before accepting another capture.
-chrome.runtime.onStartup.addListener(() => setStatus('idle'));
-setStatus(state.status);
+// A restarted worker cannot reuse its old native port or CDP object. Clear any
+// debugger attachment named by the stored marker before accepting a command,
+// while preserving the last output metadata for the popup.
+async function reconcileStartup() {
+  const { archuraFlow: stored } = await chrome.storage.session.get('archuraFlow');
+  if (stored?.tabId) {
+    await chrome.debugger.detach({ tabId: stored.tabId }).catch(() => {});
+  }
+  setStatus('idle', {
+    tabId: null,
+    tabUrl: null,
+    tabTitle: null,
+    epoch: null,
+    output: stored?.output || null,
+    screenCount: stored?.screenCount || 0,
+    sequence: 0,
+    viewerUrl: null,
+  });
+}
+
+const startup = reconcileStartup().catch((error) => fail(error));
