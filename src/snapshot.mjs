@@ -1,14 +1,16 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import {
+  MAX_SCREENSHOT_HEIGHT,
+  readStyleSheets,
+  rebaseCss,
+  serializeDocument,
+  VIEWPORTS,
+} from '../extension/browser-scripts.js';
 import { screenSignature } from './identity.mjs';
 import { harvestElements, ledgerEntry, setLedgerBucket } from './ledger.mjs';
 
-export const VIEWPORTS = {
-  desktop: { width: 1440, height: 900 },
-  tablet: { width: 768, height: 1024 },
-  mobile: { width: 390, height: 844 },
-};
-export const MAX_SCREENSHOT_HEIGHT = 12_000;
+export { MAX_SCREENSHOT_HEIGHT, rebaseCss, VIEWPORTS };
 
 const json = (value) => `${JSON.stringify(value, null, 2)}\n`;
 
@@ -48,31 +50,9 @@ export async function createRun({ rootDir, startUrl, viewportOnly = false }) {
   };
 }
 
-function rebaseCss(css, stylesheetUrl, pageUrl) {
-  const base = stylesheetUrl || pageUrl;
-  const absolute = (raw) => {
-    const value = raw.trim().replace(/^(['"])(.*)\1$/, '$2');
-    if (!value || /^(?:data:|blob:|#)/i.test(value)) return raw;
-    try {
-      return `"${new URL(value, base).href}"`;
-    } catch {
-      return raw;
-    }
-  };
-  return css
-    .replace(/url\(([^)]+)\)/gi, (_, value) => `url(${absolute(value)})`)
-    .replace(/@import\s+(?:url\()?(['"]?)([^'")\s;]+)\1\)?/gi,
-      (_, _quote, value) => `@import url(${absolute(value)})`);
-}
 
 async function collectCss(page, context) {
-  const sheets = await page.evaluate(() => [...document.styleSheets].map((sheet) => {
-    try {
-      return { href: sheet.href, css: [...sheet.cssRules].map((rule) => rule.cssText).join('\n') };
-    } catch {
-      return { href: sheet.href, css: null };
-    }
-  }));
+  const sheets = await page.evaluate(readStyleSheets, null);
 
   const chunks = [];
   for (const sheet of sheets) {
@@ -92,61 +72,7 @@ async function collectCss(page, context) {
 
 async function serializePage(page, context) {
   const css = await collectCss(page, context);
-  return page.evaluate(({ bundledCss, currentUrl }) => {
-    const root = document.documentElement.cloneNode(true);
-    const originals = [document.documentElement, ...document.documentElement.querySelectorAll('*')];
-    const clones = [root, ...root.querySelectorAll('*')];
-    const rebaseInlineCss = (value) => value.replace(/url\(([^)]+)\)/gi, (_, raw) => {
-      const unquoted = raw.trim().replace(/^(['"])(.*)\1$/, '$2');
-      if (!unquoted || /^(?:data:|blob:|#)/i.test(unquoted)) return `url(${raw})`;
-      try {
-        return `url("${new URL(unquoted, currentUrl).href}")`;
-      } catch {
-        return `url(${raw})`;
-      }
-    });
-
-    for (let index = 0; index < originals.length; index += 1) {
-      const original = originals[index];
-      const clone = clones[index];
-      if (!clone) continue;
-      if ('value' in original) clone.setAttribute('value', original.value);
-      if (original instanceof HTMLTextAreaElement) clone.textContent = original.value;
-      if ('checked' in original) clone.toggleAttribute('checked', original.checked);
-      if ('selected' in original) clone.toggleAttribute('selected', original.selected);
-      if ('open' in original) clone.toggleAttribute('open', original.open);
-      for (const attribute of ['src', 'href', 'action', 'poster']) {
-        const value = clone.getAttribute(attribute);
-        if (!value || /^(?:data:|blob:|#|javascript:|mailto:|tel:)/i.test(value)) continue;
-        try {
-          clone.setAttribute(attribute, new URL(value, currentUrl).href);
-        } catch {
-          // Keep malformed app-authored values unchanged.
-        }
-      }
-      const srcset = clone.getAttribute('srcset');
-      if (srcset) {
-        clone.setAttribute('srcset', srcset.split(',').map((candidate) => {
-          const [value, descriptor] = candidate.trim().split(/\s+/, 2);
-          try {
-            return `${new URL(value, currentUrl).href}${descriptor ? ` ${descriptor}` : ''}`;
-          } catch {
-            return candidate;
-          }
-        }).join(', '));
-      }
-      const inlineStyle = clone.getAttribute('style');
-      if (inlineStyle) clone.setAttribute('style', rebaseInlineCss(inlineStyle));
-    }
-
-    root.querySelectorAll('script,link[rel~="stylesheet"],meta[http-equiv="Content-Security-Policy" i]')
-      .forEach((element) => element.remove());
-    const style = document.createElement('style');
-    style.setAttribute('data-archura-flow', 'bundled');
-    style.textContent = bundledCss;
-    root.querySelector('head')?.append(style);
-    return `<!doctype html>\n${root.outerHTML}`;
-  }, { bundledCss: css, currentUrl: page.url() });
+  return page.evaluate(serializeDocument, { bundledCss: css, currentUrl: page.url() });
 }
 
 async function screenshot(page, file, viewportOnly) {
@@ -170,13 +96,9 @@ async function screenshot(page, file, viewportOnly) {
   });
 }
 
-export async function writeCorpus(run, rootDir) {
-  await Promise.all([
-    writeFile(path.join(run.dir, 'screens.json'), json(run.screens)),
-    writeFile(path.join(run.dir, 'ledger.json'), json(run.ledger)),
-    writeFile(path.join(run.dir, 'notes.json'), json(run.notes)),
-    writeFile(run.journeyPath, json(run.journey)),
-  ]);
+// The one corpus shape, shared by the static bundle and the live viewer's
+// /api/data so the two can never disagree about what was captured.
+export async function buildCorpusData(run) {
   const journeys = [];
   const journeyDir = path.join(run.dir, 'journeys');
   const { readdir } = await import('node:fs/promises');
@@ -186,13 +108,23 @@ export async function writeCorpus(run, rootDir) {
       ...JSON.parse(await readFile(path.join(journeyDir, file), 'utf8')),
     });
   }
-  const data = {
+  return {
     domain: run.name,
     screens: run.screens.screens,
     journeys,
     ledger: run.ledger.elements,
     notes: run.notes,
   };
+}
+
+export async function writeCorpus(run, rootDir) {
+  await Promise.all([
+    writeFile(path.join(run.dir, 'screens.json'), json(run.screens)),
+    writeFile(path.join(run.dir, 'ledger.json'), json(run.ledger)),
+    writeFile(path.join(run.dir, 'notes.json'), json(run.notes)),
+    writeFile(run.journeyPath, json(run.journey)),
+  ]);
+  const data = await buildCorpusData(run);
   await Promise.all([
     writeFile(path.join(run.dir, 'data.js'), `window.DATA = ${JSON.stringify(data)};\n`),
     readFile(path.join(rootDir, 'viewer', 'index.html')).then((viewer) =>
@@ -200,16 +132,23 @@ export async function writeCorpus(run, rootDir) {
   ]);
 }
 
-export async function captureScreen({
-  page,
-  context,
+// The single writer of screen, journey, and ledger records. Both transports go
+// through here: `writeArtifacts` puts the HTML and PNGs in place (Playwright
+// renders them; the extension moves already-streamed temp files), and
+// `collectElements` supplies the harvest.
+export async function recordScreen({
   run,
   rootDir,
+  signature,
+  url,
+  title,
   source,
   state,
   edge = [],
+  metadata,
+  writeArtifacts,
+  collectElements,
 }) {
-  const signature = await screenSignature(page);
   const known = run.screens.screens.find((screen) => screen.signature === signature);
 
   if (source === 'explorer' && known) {
@@ -223,36 +162,29 @@ export async function captureScreen({
   const htmlPath = `html/${id}.html`;
   const shots = Object.fromEntries(Object.keys(VIEWPORTS).map((name) =>
     [name, `shots/${id}-${name}.png`]));
-  const html = await serializePage(page, context);
-  await writeFile(path.join(run.dir, htmlPath), html);
-
-  try {
-    for (const [name, viewport] of Object.entries(VIEWPORTS)) {
-      if (name !== 'desktop') await page.setViewportSize(viewport);
-      await screenshot(page, path.join(run.dir, shots[name]), run.viewportOnly);
-    }
-  } finally {
-    await page.setViewportSize(VIEWPORTS.desktop);
-  }
+  // A transport that could not produce every viewport returns the subset it
+  // actually wrote, so the record never points at a file that does not exist.
+  const written = await writeArtifacts({ id, htmlPath, shots });
 
   const screen = {
     id,
     signature,
-    url: page.url(),
-    title: await page.title(),
+    url,
+    title,
     source,
     ...(source === 'combo' && known ? { sameAs: known.id } : {}),
     state: {
-      root: state?.root || page.url(),
+      root: state?.root || url,
       path: state?.path || [],
     },
-    shots,
+    shots: written?.shots || shots,
     html: htmlPath,
     capturedAt: new Date().toISOString(),
+    ...(metadata || {}),
   };
   run.screens.screens.push(screen);
 
-  const elements = await harvestElements(page);
+  const elements = await collectElements();
   run.ledger.elements.push(...elements.map((element) => ledgerEntry(element, id)));
 
   const previous = run.journey.steps.at(-1);
@@ -264,4 +196,38 @@ export async function captureScreen({
   run.journey.steps.push({ screen: id, edge });
   await writeCorpus(run, rootDir);
   return { screen, created: true, elements };
+}
+
+export async function captureScreen({
+  page,
+  context,
+  run,
+  rootDir,
+  source,
+  state,
+  edge = [],
+}) {
+  return recordScreen({
+    run,
+    rootDir,
+    signature: await screenSignature(page),
+    url: page.url(),
+    title: await page.title(),
+    source,
+    state,
+    edge,
+    writeArtifacts: async ({ htmlPath, shots }) => {
+      const html = await serializePage(page, context);
+      await writeFile(path.join(run.dir, htmlPath), html);
+      try {
+        for (const [name, viewport] of Object.entries(VIEWPORTS)) {
+          if (name !== 'desktop') await page.setViewportSize(viewport);
+          await screenshot(page, path.join(run.dir, shots[name]), run.viewportOnly);
+        }
+      } finally {
+        await page.setViewportSize(VIEWPORTS.desktop);
+      }
+    },
+    collectElements: () => harvestElements(page),
+  });
 }

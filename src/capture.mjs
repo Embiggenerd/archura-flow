@@ -4,8 +4,12 @@ import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
+import { injectedListeners } from '../extension/browser-scripts.js';
+import { CaptureSession, formatCaptureResult } from './capture-session.mjs';
 import { DEFAULT_BUDGET, DEFAULT_DELAY, DEFAULT_DEPTH, explore } from './explore.mjs';
-import { captureScreen, createRun, outputName, VIEWPORTS } from './snapshot.mjs';
+import { createRun, outputName, VIEWPORTS } from './snapshot.mjs';
+
+export { injectedListeners };
 
 export const CAPTURE_COMBO = { ctrlKey: true, shiftKey: true, code: 'KeyS' };
 export const DEFAULT_CDP_PORT = 9222;
@@ -67,56 +71,6 @@ export function parseArgs(argv) {
   return options;
 }
 
-export function injectedListeners(combo) {
-  if (window.__archuraFlowInstalled) return;
-  window.__archuraFlowInstalled = true;
-
-  const clean = (value) => String(value || '').replace(/\s+/g, ' ').trim().slice(0, 120);
-  const keyFor = (element) => {
-    if (!(element instanceof Element)) return null;
-    const parts = [];
-    let current = element;
-    while (current && current !== document.documentElement) {
-      const tag = current.tagName.toLowerCase();
-      const siblings = current.parentElement
-        ? [...current.parentElement.children].filter((item) => item.tagName === current.tagName)
-        : [current];
-      parts.unshift(`${tag}[${siblings.indexOf(current)}]`);
-      current = current.parentElement;
-    }
-    const text = clean(element.innerText || element.value || element.getAttribute('aria-label') ||
-      element.getAttribute('title') || element.getAttribute('name') || element.type);
-    return `${element.tagName.toLowerCase()}|${text}|${parts.join('>')}`;
-  };
-  const describe = (element, verb) => {
-    const name = clean(element?.innerText || element?.value || element?.getAttribute?.('aria-label') ||
-      element?.getAttribute?.('name') || element?.tagName?.toLowerCase() || 'element');
-    return `${verb} on '${name}'`;
-  };
-  const send = (entry) => window.__archuraFlow({
-    ...entry,
-    url: location.href,
-    at: new Date().toISOString(),
-  }).catch(() => {});
-
-  document.addEventListener('click', (event) => {
-    const element = event.target?.closest?.('a,button,input,select,textarea,[role="button"],[onclick],[tabindex],summary,[contenteditable]');
-    if (element) send({ kind: 'journal', type: 'click', key: keyFor(element), label: describe(element, 'click') });
-  }, true);
-  document.addEventListener('keydown', (event) => {
-    if (event.ctrlKey === combo.ctrlKey && event.shiftKey === combo.shiftKey && event.code === combo.code) {
-      event.preventDefault();
-      event.stopImmediatePropagation();
-      send({ kind: 'capture' });
-      return;
-    }
-    if (event.key === 'Enter') {
-      const element = event.target instanceof Element ? event.target : document.activeElement;
-      send({ kind: 'journal', type: 'enter', key: keyFor(element), label: describe(element, 'enter') });
-    }
-  }, true);
-}
-
 async function main() {
   let options;
   try {
@@ -143,53 +97,36 @@ async function main() {
     startUrl: options.url,
     viewportOnly: options.viewportOnly,
   });
-  const journals = new Map();
-  let captureQueue = Promise.resolve();
+  const session = new CaptureSession({ run, rootDir: ROOT_DIR });
 
   await context.exposeBinding('__archuraFlow', async ({ page }, payload) => {
     if (payload.kind === 'journal') {
-      const entries = journals.get(page) || [];
-      entries.push({
+      session.appendJournal(page, {
         type: payload.type,
         key: payload.key,
         label: payload.label,
         url: payload.url,
         at: payload.at,
       });
-      journals.set(page, entries);
       return;
     }
-    captureQueue = captureQueue.then(async () => {
-      const edge = journals.get(page) || [];
-      journals.set(page, []);
-      const result = await captureScreen({
-        page,
-        context,
-        run,
-        rootDir: ROOT_DIR,
-        source: 'combo',
-        state: { root: page.url(), path: [] },
-        edge,
-      });
-      console.log(`✓ screen ${result.screen.id.slice(1)}: ${new URL(result.screen.url).pathname} "${result.screen.title}"`);
-    }).catch((error) => console.error(`Capture failed: ${error.message}`));
-    await captureQueue;
+    await session.capture({ page, context })
+      .then((result) => console.log(formatCaptureResult(result)))
+      .catch((error) => console.error(`Capture failed: ${error.message}`));
   });
   await context.addInitScript(injectedListeners, CAPTURE_COMBO);
 
   const preparePage = (page) => {
-    journals.set(page, []);
+    session.openChannel(page);
     page.on('framenavigated', (frame) => {
       if (frame !== page.mainFrame()) return;
-      const entries = journals.get(page) || [];
-      entries.push({
+      session.appendJournal(page, {
         type: 'nav',
         key: null,
         label: `navigate to '${frame.url()}'`,
         url: frame.url(),
         at: new Date().toISOString(),
       });
-      journals.set(page, entries);
     });
   };
   context.pages().forEach(preparePage);
@@ -198,7 +135,7 @@ async function main() {
   const page = context.pages()[0] || await context.newPage();
   try {
     await page.goto(options.url, { waitUntil: 'domcontentloaded' });
-    journals.set(page, []);
+    session.openChannel(page);
     console.log(`Browser ready at ${page.url()}`);
     console.log(`Capture: Ctrl+Shift+S · CDP: http://127.0.0.1:${options.cdpPort}`);
 

@@ -122,13 +122,16 @@
   <script src="./data.js"></script>
   <script>
     (() => {
-      const data = window.DATA || { domain: '', screens: [], journeys: [], ledger: [], notes: {} };
-      const storageKey = `archura-flow:${data.domain}:notes`;
-      let notes = { ...data.notes };
-      try { notes = { ...notes, ...JSON.parse(localStorage.getItem(storageKey) || '{}') }; } catch {}
-      const byId = new Map(data.screens.map((screen) => [screen.id, screen]));
-      document.getElementById('domain').textContent = data.domain;
+      const EMPTY = { domain: '', screens: [], journeys: [], ledger: [], notes: {} };
+      let data = window.DATA || EMPTY;
+      let storageKey = `archura-flow:${data.domain}:notes`;
+      let notes = {};
+      let byId = new Map();
 
+      const loadNotes = () => {
+        notes = { ...data.notes };
+        try { notes = { ...notes, ...JSON.parse(localStorage.getItem(storageKey) || '{}') }; } catch {}
+      };
       const saveNote = (screen, value) => {
         notes[screen] = value;
         localStorage.setItem(storageKey, JSON.stringify(notes));
@@ -137,7 +140,7 @@
         const article = document.createElement('article');
         article.className = 'screen-card';
         const image = document.createElement('img');
-        image.src = screen.shots.desktop;
+        image.src = screen.shots.desktop || screen.shots.tablet || screen.shots.mobile || '';
         image.alt = screen.title;
         image.loading = 'lazy';
         const body = document.createElement('div');
@@ -164,12 +167,6 @@
       };
 
       const journeySelect = document.getElementById('journey-select');
-      data.journeys.forEach((journey) => {
-        const option = document.createElement('option');
-        option.value = journey.id;
-        option.textContent = `${journey.id} (${journey.steps.length} steps)`;
-        journeySelect.append(option);
-      });
       const renderJourney = () => {
         const root = document.getElementById('journey');
         root.replaceChildren();
@@ -196,13 +193,29 @@
         });
       };
       journeySelect.addEventListener('change', renderJourney);
-      renderJourney();
 
-      const graph = document.getElementById('graph');
-      if (!data.screens.length) {
-        graph.className = 'view empty';
-        graph.textContent = 'No screens captured yet.';
-      } else {
+      const renderJourneySelect = () => {
+        const previous = journeySelect.value;
+        journeySelect.replaceChildren();
+        data.journeys.forEach((journey) => {
+          const option = document.createElement('option');
+          option.value = journey.id;
+          option.textContent = `${journey.id} (${journey.steps.length} steps)`;
+          journeySelect.append(option);
+        });
+        if (previous && data.journeys.some((journey) => journey.id === previous)) {
+          journeySelect.value = previous;
+        }
+      };
+
+      const renderGraph = () => {
+        const graph = document.getElementById('graph');
+        graph.replaceChildren();
+        if (!data.screens.length) {
+          graph.className = 'view empty';
+          graph.textContent = 'No screens captured yet.';
+          return;
+        }
         graph.className = 'view graph';
         const outgoing = new Map();
         const edges = [];
@@ -285,7 +298,7 @@
           box.setAttribute('rx', '9');
           const image = document.createElementNS(namespace, 'image');
           image.setAttribute('class', 'node-shot');
-          image.setAttribute('href', screen.shots.desktop);
+          image.setAttribute('href', screen.shots.desktop || screen.shots.tablet || screen.shots.mobile || '');
           image.setAttribute('x', position.x + 1);
           image.setAttribute('y', position.y + 1);
           image.setAttribute('width', nodeWidth - 2);
@@ -305,41 +318,56 @@
           svg.append(group);
         });
         graph.append(svg);
-      }
+      };
 
-      const coverage = document.getElementById('coverage');
-      const counts = data.ledger.reduce((result, entry) => {
-        const key = entry.bucket === 'skipped' ? `skipped:${entry.reason}` : entry.bucket;
-        result[key] = (result[key] || 0) + 1;
-        return result;
-      }, {});
-      const metrics = document.createElement('div');
-      metrics.className = 'coverage';
-      Object.entries(counts).sort().forEach(([label, count]) => {
-        const metric = document.createElement('div');
-        metric.className = 'metric';
-        const strong = document.createElement('strong');
-        strong.textContent = count;
-        const span = document.createElement('span');
-        span.textContent = label;
-        metric.append(strong, span);
-        metrics.append(metric);
-      });
-      const table = document.createElement('table');
-      table.innerHTML = '<thead><tr><th>Screen</th><th>Element</th><th>Bucket</th><th>Destination</th></tr></thead>';
-      const tbody = document.createElement('tbody');
-      data.ledger.forEach((entry) => {
-        const row = document.createElement('tr');
-        [entry.screen, entry.text || entry.key, entry.reason ? `${entry.bucket}: ${entry.reason}` : entry.bucket, entry.href || '—']
-          .forEach((value) => {
-            const cell = document.createElement('td');
-            cell.textContent = value;
-            row.append(cell);
-          });
-        tbody.append(row);
-      });
-      table.append(tbody);
-      coverage.append(metrics, table);
+      const renderCoverage = () => {
+        const coverage = document.getElementById('coverage');
+        coverage.replaceChildren();
+        const counts = data.ledger.reduce((result, entry) => {
+          const key = entry.bucket === 'skipped' ? `skipped:${entry.reason}` : entry.bucket;
+          result[key] = (result[key] || 0) + 1;
+          return result;
+        }, {});
+        const metrics = document.createElement('div');
+        metrics.className = 'coverage';
+        Object.entries(counts).sort().forEach(([label, count]) => {
+          const metric = document.createElement('div');
+          metric.className = 'metric';
+          const strong = document.createElement('strong');
+          strong.textContent = count;
+          const span = document.createElement('span');
+          span.textContent = label;
+          metric.append(strong, span);
+          metrics.append(metric);
+        });
+        const table = document.createElement('table');
+        table.innerHTML = '<thead><tr><th>Screen</th><th>Element</th><th>Bucket</th><th>Destination</th></tr></thead>';
+        const tbody = document.createElement('tbody');
+        data.ledger.forEach((entry) => {
+          const row = document.createElement('tr');
+          [entry.screen, entry.text || entry.key, entry.reason ? `${entry.bucket}: ${entry.reason}` : entry.bucket, entry.href || '—']
+            .forEach((value) => {
+              const cell = document.createElement('td');
+              cell.textContent = value;
+              row.append(cell);
+            });
+          tbody.append(row);
+        });
+        table.append(tbody);
+        coverage.append(metrics, table);
+      };
+
+      const render = (next) => {
+        data = next || EMPTY;
+        storageKey = `archura-flow:${data.domain}:notes`;
+        loadNotes();
+        byId = new Map(data.screens.map((screen) => [screen.id, screen]));
+        document.getElementById('domain').textContent = data.domain;
+        renderJourneySelect();
+        renderJourney();
+        renderGraph();
+        renderCoverage();
+      };
 
       document.querySelectorAll('nav button').forEach((button) => {
         button.addEventListener('click', () => {
@@ -355,6 +383,28 @@
         link.click();
         setTimeout(() => URL.revokeObjectURL(link.href), 0);
       });
+
+      render(data);
+
+      // Served over HTTP by the native host: poll the live corpus. Under
+      // file:// the bundled data.js above is the whole story.
+      if (location.protocol === 'http:' || location.protocol === 'https:') {
+        const fingerprint = (value) => `${value.screens.length}:${value.ledger.length}:` +
+          value.journeys.reduce((total, journey) => total + journey.steps.length, 0);
+        let seen = fingerprint(data);
+        setInterval(async () => {
+          try {
+            const response = await fetch('./api/data', { cache: 'no-store' });
+            if (!response.ok) return;
+            const next = await response.json();
+            if (fingerprint(next) === seen) return;
+            // Never yank a note out from under someone mid-sentence.
+            if (document.activeElement?.tagName === 'TEXTAREA') return;
+            seen = fingerprint(next);
+            render(next);
+          } catch {}
+        }, 1500);
+      }
     })();
   </script>
 </body>

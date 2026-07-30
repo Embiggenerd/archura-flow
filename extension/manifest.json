@@ -1,0 +1,41 @@
+{
+  "manifest_version": 3,
+  "name": "archura-flow capture",
+  "version": "1.0.0",
+  "description": "Capture screens and action journeys from an already-authenticated Chrome tab.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAx0c3p5ljNy437mb39PEoy5obT27IGzHaNH5O9wafiMX9haFdMr0U5R/56ezodi371FawiCZq2VTuYc2LRAa+zjlkKbFtoz/x9iRkSB1LIGpwH9Kv6jifRCYTNNJsWuXBLkNasiQtsH+V16t/z11z9ljNijpgdTDhHigiJiUBTYmpncRr3A+kMGkUItoMs/wg6IwUaZBBV2VMoTlF2jM+7BHemXXT4QSkOZPv5mFVWeLZnMVRAJqCecieaaJ7rDLQf+2H9owpDwpXFjGkTWwQ2g8twpciwdwvfH8liqByJMFIfDZjxXggjS+DBTwWfw+bPeacjJ+FKA/I9pFeXvjIAwIDAQAB",
+  "minimum_chrome_version": "116",
+  "permissions": [
+    "activeTab",
+    "debugger",
+    "nativeMessaging",
+    "storage"
+  ],
+  "background": {
+    "service_worker": "service-worker.js",
+    "type": "module"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "archura-flow capture",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "48": "icons/icon-48.png",
+      "128": "icons/icon-128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon-16.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
+  "commands": {
+    "capture": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+Y",
+        "mac": "Command+Shift+Y"
+      },
+      "description": "Start recording this tab, or capture the next screen"
+    }
+  }
+}

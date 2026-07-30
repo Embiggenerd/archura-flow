@@ -37,6 +37,19 @@ the MCP browser with:
 
 The agent uses the same capture contract as a person: send `Ctrl+Shift+S`.
 
+## Capturing from your own Chrome
+
+To capture a tab you are already logged into, in your everyday Chrome profile,
+install the companion extension instead of launching a browser:
+
+```sh
+npm run extension:install
+```
+
+One shortcut binds a recording to that exact tab and each later press captures
+another screen. See [EXTENSION.md](EXTENSION.md) for setup, permissions, and
+recovery. Manual capture only — the explorer stays in the app-launched profile.
+
 ## Automatic exploration
 
 Use only with a disposable audit account. The explorer mutates data, but skips

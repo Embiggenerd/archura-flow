@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <link rel="stylesheet" href="popup.css">
+  <title>archura-flow</title>
+</head>
+<body>
+  <header>
+    <h1>archura-flow</h1>
+    <span id="status" class="pill">idle</span>
+  </header>
+  <dl>
+    <dt>Tab</dt><dd id="tab">—</dd>
+    <dt>Output</dt><dd id="output">—</dd>
+    <dt>Screens</dt><dd id="screens">0</dd>
+    <dt>Last capture</dt><dd id="last">—</dd>
+  </dl>
+  <p id="error" hidden></p>
+  <div class="actions">
+    <button id="capture" class="primary">Start recording</button>
+    <button id="viewer">Open flow</button>
+    <button id="stop">Stop recording</button>
+    <button id="retry" hidden>Retry attachment</button>
+  </div>
+  <script src="popup.js" type="module"></script>
+</body>
+</html>

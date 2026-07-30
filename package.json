@@ -5,7 +5,10 @@
   "type": "module",
   "scripts": {
     "capture": "node src/capture.mjs",
-    "test": "node --test"
+    "test": "node --test",
+    "extension:install": "node scripts/install-native-host.mjs",
+    "extension:uninstall": "node scripts/uninstall-native-host.mjs",
+    "extension:self-test": "node scripts/install-native-host.mjs --self-test"
   },
   "dependencies": {
     "playwright": "1.62.0"
